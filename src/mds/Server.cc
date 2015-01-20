@@ -1085,6 +1085,25 @@ void Server::reply_client_request(MDRequestRef& mdr, MClientReply *reply)
   // clean up request
   mdcache->request_finish(mdr);
 
+  dout(10) << __func__ << ": finished request, examining tracei" << dendl;
+  if (tracei) {
+    dout(10) << "  tracei: " << *tracei << dendl;
+    if (tracei->get_parent_dn()) {
+      dout(10) << "  tracei parent dn: " << *(tracei->get_parent_dn()) << dendl;
+      dout(10) << "  tracei is remote: " << tracei->get_parent_dn()->get_projected_linkage()->is_remote() << dendl;
+
+    } else {
+      dout(10) << "  tracei no parent dn" << dendl;
+    }
+  } else {
+    dout(10) << "  tracei not set" << dendl;
+  }
+
+  if (tracedn) {
+    dout(10) << "  tracedn: " << *tracedn << dendl;
+    dout(10) << "  tracedn remote: " << tracedn->get_projected_linkage()->is_remote() << dendl;
+  }
+
   // take a closer look at tracei, if it happens to be a remote link
   if (tracei && 
       tracedn &&
@@ -5280,9 +5299,12 @@ void Server::_unlink_local_finish(MDRequestRef& mdr,
 
   // clean up?
   if (straydn) {
-    if (strayin->is_dir())
+    if (strayin->is_dir()) {
       mdcache->try_remove_dentries_for_stray(strayin);
-    mdcache->eval_stray(straydn);
+    }
+    // Tip off the MDCache that this dentry is a stray that
+    // might be elegible for purge.
+    mdcache->notify_stray(straydn);
   }
 }
 
@@ -6114,8 +6136,9 @@ void Server::_rename_finish(MDRequestRef& mdr, CDentry *srcdn, CDentry *destdn, 
     mds->locker->eval(in, CEPH_CAP_LOCKS, true);
 
   // clean up?
-  if (straydn) 
-    mdcache->eval_stray(straydn);
+  if (straydn) {
+    mdcache->notify_stray(straydn);
+  }
 }
 
 
@@ -6551,6 +6574,11 @@ void Server::_rename_apply(MDRequestRef& mdr, CDentry *srcdn, CDentry *destdn, C
   // unlink src before we relink it at dest
   CInode *in = srcdnl->get_inode();
   assert(in);
+
+  if (srcdn->get_dir()->inode->is_stray()) {
+    dout(10) << __func__ << ": dentry was a stray, updating stats" << dendl;
+    mdcache->notify_stray_removed();
+  }
 
   bool srcdn_was_remote = srcdnl->is_remote();
   srcdn->get_dir()->unlink_inode(srcdn);
