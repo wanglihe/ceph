@@ -966,9 +966,7 @@ void Migrator::export_frozen(CDir *dir, uint64_t tid)
   MExportDirPrep *prep = new MExportDirPrep(dir->dirfrag(), it->second.tid);
 
   // include list of bystanders
-  for (map<mds_rank_t,unsigned>::iterator p = dir->replicas_begin();
-       p != dir->replicas_end();
-       ++p) {
+  for (compact_map<mds_rank_t,unsigned>::iterator p = dir->replicas_begin(); !p.end(); ++p) {
     if (p->first != it->second.peer) {
       dout(10) << "bystander mds." << p->first << dendl;
       prep->add_bystander(p->first);
@@ -1146,9 +1144,7 @@ void Migrator::handle_export_prep_ack(MExportDirPrepAck *m)
 	  it->second.warning_ack_waiting.count(MDS_RANK_NONE) > 0));
   assert(it->second.notify_ack_waiting.empty());
 
-  for (map<mds_rank_t,unsigned>::iterator p = dir->replicas_begin();
-       p != dir->replicas_end();
-       ++p) {
+  for (compact_map<mds_rank_t,unsigned>::iterator p = dir->replicas_begin(); !p.end(); ++p) {
     if (p->first == it->second.peer) continue;
     if (!mds->mdsmap->is_clientreplay_or_active_or_stopping(p->first))
       continue;  // only if active

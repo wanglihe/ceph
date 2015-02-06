@@ -1963,8 +1963,7 @@ update:
     msg->quota = i->quota;
     mds->send_message_client_counted(msg, session->connection);
   }
-  for (map<const mds_rank_t, unsigned>::iterator it = in->replicas_begin();
-       it != in->replicas_end(); ++it) {
+  for (compact_map<mds_rank_t, unsigned>::iterator it = in->replicas_begin(); !it.end(); ++it) {
     MGatherCaps *msg = new MGatherCaps;
     msg->ino = in->ino();
     mds->send_message_mds(msg, it->first);
@@ -5688,9 +5687,7 @@ void MDCache::rejoin_send_acks()
       dq.pop_front();
       
       // dir
-      for (map<mds_rank_t,unsigned>::iterator r = dir->replicas_begin();
-	   r != dir->replicas_end();
-	   ++r) {
+      for (compact_map<mds_rank_t,unsigned>::iterator r = dir->replicas_begin(); !r.end(); ++r) {
 	ack[r->first]->add_strong_dirfrag(dir->dirfrag(), ++r->second, dir->dir_rep);
 	ack[r->first]->add_dirfrag_base(dir);
       }
@@ -5707,9 +5704,7 @@ void MDCache::rejoin_send_acks()
 	  in = dnl->get_inode();
 
 	// dentry
-	for (map<mds_rank_t,unsigned>::iterator r = dn->replicas_begin();
-	     r != dn->replicas_end();
-	     ++r) {
+	for (compact_map<mds_rank_t,unsigned>::iterator r = dn->replicas_begin(); !r.end(); ++r) {
 	  ack[r->first]->add_strong_dentry(dir->dirfrag(), dn->name, dn->first, dn->last,
 					   dnl->is_primary() ? dnl->get_inode()->ino():inodeno_t(0),
 					   dnl->is_remote() ? dnl->get_remote_ino():inodeno_t(0),
@@ -5724,9 +5719,7 @@ void MDCache::rejoin_send_acks()
 	if (!in)
 	  continue;
 
-	for (map<mds_rank_t,unsigned>::iterator r = in->replicas_begin();
-	     r != in->replicas_end();
-	     ++r) {
+	for (compact_map<mds_rank_t,unsigned>::iterator r = in->replicas_begin(); !r.end(); ++r) {
 	  ack[r->first]->add_inode_base(in);
 	  bufferlist bl;
 	  in->_encode_locks_state_for_rejoin(bl, r->first);
@@ -5741,18 +5734,14 @@ void MDCache::rejoin_send_acks()
 
   // base inodes too
   if (root && root->is_auth()) 
-    for (map<mds_rank_t,unsigned>::iterator r = root->replicas_begin();
-	 r != root->replicas_end();
-	 ++r) {
+    for (compact_map<mds_rank_t,unsigned>::iterator r = root->replicas_begin(); !r.end(); ++r) {
       ack[r->first]->add_inode_base(root);
       bufferlist bl;
       root->_encode_locks_state_for_rejoin(bl, r->first);
       ack[r->first]->add_inode_locks(root, ++r->second, bl);
     }
   if (myin)
-    for (map<mds_rank_t,unsigned>::iterator r = myin->replicas_begin();
-	 r != myin->replicas_end();
-	 ++r) {
+    for (compact_map<mds_rank_t,unsigned>::iterator r = myin->replicas_begin(); !r.end(); ++r) {
       ack[r->first]->add_inode_base(myin);
       bufferlist bl;
       myin->_encode_locks_state_for_rejoin(bl, r->first);
@@ -5764,9 +5753,7 @@ void MDCache::rejoin_send_acks()
        p != rejoin_potential_updated_scatterlocks.end();
        ++p) {
     CInode *in = *p;
-    for (map<mds_rank_t,unsigned>::iterator r = in->replicas_begin();
-	 r != in->replicas_end();
-	 ++r)
+    for (compact_map<mds_rank_t,unsigned>::iterator r = in->replicas_begin(); !r.end(); ++r)
       ack[r->first]->add_inode_base(in);
   }
 
@@ -10178,9 +10165,7 @@ int MDCache::send_dir_updates(CDir *dir, bool bcast)
   if (bcast) {
     mds->get_mds_map()->get_active_mds_set(who);
   } else {
-    for (map<mds_rank_t,unsigned>::iterator p = dir->replicas_begin();
-	 p != dir->replicas_end();
-	 ++p)
+    for (compact_map<mds_rank_t,unsigned>::iterator p = dir->replicas_begin(); !p.end(); ++p)
       who.insert(p->first);
   }
   
@@ -10259,9 +10244,7 @@ void MDCache::send_dentry_link(CDentry *dn, MDRequestRef& mdr)
   dout(7) << "send_dentry_link " << *dn << dendl;
 
   CDir *subtree = get_subtree_root(dn->get_dir());
-  for (map<mds_rank_t,unsigned>::iterator p = dn->replicas_begin();
-       p != dn->replicas_end(); 
-       ++p) {
+  for (compact_map<mds_rank_t,unsigned>::iterator p = dn->replicas_begin(); !p.end(); ++p) {
     // don't tell (rename) witnesses; they already know
     if (mdr.get() && mdr->more()->witnessed.count(p->first))
       continue;
@@ -10340,26 +10323,26 @@ void MDCache::send_dentry_unlink(CDentry *dn, CDentry *straydn, MDRequestRef& md
 {
   dout(10) << "send_dentry_unlink " << *dn << dendl;
   // share unlink news with replicas
-  map<mds_rank_t,unsigned> replicas;
-  replicas.insert(dn->replicas_begin(), dn->replicas_end());
+  set<mds_rank_t> replicas;
+  dn->list_replicas(replicas);
   if (straydn)
-    replicas.insert(straydn->replicas_begin(), straydn->replicas_end());
-  for (map<mds_rank_t,unsigned>::iterator it = replicas.begin();
+    straydn->list_replicas(replicas);
+  for (set<mds_rank_t>::iterator it = replicas.begin();
        it != replicas.end();
        ++it) {
     // don't tell (rmdir) witnesses; they already know
-    if (mdr.get() && mdr->more()->witnessed.count(it->first))
+    if (mdr.get() && mdr->more()->witnessed.count(*it))
       continue;
 
-    if (mds->mdsmap->get_state(it->first) < MDSMap::STATE_REJOIN ||
-	(mds->mdsmap->get_state(it->first) == MDSMap::STATE_REJOIN &&
-	 rejoin_gather.count(it->first)))
+    if (mds->mdsmap->get_state(*it) < MDSMap::STATE_REJOIN ||
+	(mds->mdsmap->get_state(*it) == MDSMap::STATE_REJOIN &&
+	 rejoin_gather.count(*it)))
       continue;
 
     MDentryUnlink *unlink = new MDentryUnlink(dn->get_dir()->dirfrag(), dn->name);
     if (straydn)
-      replicate_stray(straydn, it->first, unlink->straybl);
-    mds->send_message_mds(unlink, it->first);
+      replicate_stray(straydn, *it, unlink->straybl);
+    mds->send_message_mds(unlink, *it);
   }
 }
 
@@ -11174,9 +11157,7 @@ void MDCache::_fragment_stored(MDRequestRef& mdr)
 
   // tell peers
   CDir *first = *info.resultfrags.begin();
-  for (map<mds_rank_t,unsigned>::iterator p = first->replicas_begin();
-       p != first->replica_map.end();
-       ++p) {
+  for (compact_map<mds_rank_t,unsigned>::iterator p = first->replicas_begin(); !p.end(); ++p) {
     if (mds->mdsmap->get_state(p->first) < MDSMap::STATE_REJOIN ||
 	(mds->mdsmap->get_state(p->first) == MDSMap::STATE_REJOIN &&
 	 rejoin_gather.count(p->first)))
