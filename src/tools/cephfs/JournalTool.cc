@@ -924,14 +924,13 @@ int JournalTool::replay_offline(EMetaBlob const &metablob, bool const dry_run)
     inode.inode = fb.inode;
     inode.xattrs = fb.xattrs;
     inode.dirfragtree = fb.dirfragtree;
-    inode.snap_blob = fb.snapbl;
     inode.symlink = fb.symlink;
     inode.old_inodes = fb.old_inodes;
 
     inode_bl.clear();
     std::string magic = CEPH_FS_ONDISK_MAGIC;
     ::encode(magic, inode_bl);
-    inode.encode(inode_bl);
+    inode.encode(inode_bl, &fb.snapbl);
 
     if (!dry_run) {
       r = io.write_full(root_oid.name, inode_bl);
@@ -1011,10 +1010,9 @@ int JournalTool::replay_offline(EMetaBlob const &metablob, bool const dry_run)
       inode.inode = fb.inode;
       inode.xattrs = fb.xattrs;
       inode.dirfragtree = fb.dirfragtree;
-      inode.snap_blob = fb.snapbl;
       inode.symlink = fb.symlink;
       inode.old_inodes = fb.old_inodes;
-      inode.encode_bare(dentry_bl);
+      inode.encode_bare(dentry_bl, &fb.snapbl);
       
       vals[key] = dentry_bl;
       if (!dry_run) {
@@ -1149,15 +1147,14 @@ void JournalTool::encode_fullbit_as_inode(
   new_inode.inode = fb.inode;
   new_inode.xattrs = fb.xattrs;
   new_inode.dirfragtree = fb.dirfragtree;
-  new_inode.snap_blob = fb.snapbl;
   new_inode.symlink = fb.symlink;
   new_inode.old_inodes = fb.old_inodes;
 
   // Serialize InodeStore
   if (bare) {
-    new_inode.encode_bare(*out_bl);
+    new_inode.encode_bare(*out_bl, &fb.snapbl);
   } else {
-    new_inode.encode(*out_bl);
+    new_inode.encode(*out_bl, &fb.snapbl);
   }
 }
 

@@ -1240,30 +1240,33 @@ void CInode::verify_diri_backtrace(bufferlist &bl, int err)
 // parent dir
 
 
-void InodeStore::encode_bare(bufferlist &bl) const
+void InodeStore::encode_bare(bufferlist &bl, const bufferlist *snap_blob) const
 {
   ::encode(inode, bl);
   if (is_symlink())
     ::encode(symlink, bl);
   ::encode(dirfragtree, bl);
   ::encode(xattrs, bl);
-  ::encode(snap_blob, bl);
+  if (snap_blob)
+    ::encode(*snap_blob, bl);
+  else
+    ::encode((uint32_t)0, bl);
   ::encode(old_inodes, bl);
   ::encode(oldest_snap, bl);
 }
 
-void InodeStore::encode(bufferlist &bl) const
+void InodeStore::encode(bufferlist &bl, const bufferlist *snap_blob) const
 {
   ENCODE_START(5, 4, bl);
-  encode_bare(bl);
+  encode_bare(bl, snap_blob);
   ENCODE_FINISH(bl);
 }
 
 void CInode::encode_store(bufferlist& bl)
 {
+  bufferlist snap_blob;
   encode_snap_blob(snap_blob);
-  InodeStore::encode(bl);
-  snap_blob.clear();
+  InodeStore::encode(bl, &snap_blob);
 }
 
 void InodeStore::decode_bare(bufferlist::iterator &bl, __u8 struct_v)
@@ -1273,7 +1276,15 @@ void InodeStore::decode_bare(bufferlist::iterator &bl, __u8 struct_v)
     ::decode(symlink, bl);
   ::decode(dirfragtree, bl);
   ::decode(xattrs, bl);
-  ::decode(snap_blob, bl);
+
+  uint32_t snap_blob_len;
+  ::decode(snap_blob_len, bl);
+  assert(!_snap_blob);
+  if (snap_blob_len) {
+    _snap_blob = new bufferlist;
+    ::decode_nohead(snap_blob_len, *_snap_blob, bl);
+  }
+
   ::decode(old_inodes, bl);
   if (struct_v == 2 && inode.is_dir()) {
     bool default_layout_exists;
@@ -1298,8 +1309,11 @@ void InodeStore::decode(bufferlist::iterator &bl)
 void CInode::decode_store(bufferlist::iterator& bl)
 {
   InodeStore::decode(bl);
-  decode_snap_blob(snap_blob);
-  snap_blob.clear();
+  if (_snap_blob) {
+    decode_snap_blob(*_snap_blob);
+    delete _snap_blob;
+    _snap_blob = NULL;
+  }
 }
 
 // ------------------
@@ -2424,8 +2438,8 @@ old_inode_t& CInode::cow_old_inode(snapid_t follows, bool cow_head)
 
 void CInode::split_old_inode(snapid_t snap)
 {
-  map<snapid_t, old_inode_t>::iterator p = old_inodes.lower_bound(snap);
-  assert(p != old_inodes.end() && p->second.first < snap);
+  compact_map<snapid_t, old_inode_t>::iterator p = old_inodes.lower_bound(snap);
+  assert(!p.end() && p->second.first < snap);
 
   old_inode_t &old = old_inodes[snap - 1];
   old = p->second;
@@ -2449,8 +2463,8 @@ void CInode::purge_stale_snap_data(const set<snapid_t>& snaps)
   if (old_inodes.empty())
     return;
 
-  map<snapid_t,old_inode_t>::iterator p = old_inodes.begin();
-  while (p != old_inodes.end()) {
+  compact_map<snapid_t,old_inode_t>::iterator p = old_inodes.begin();
+  while (!p.end()) {
     set<snapid_t>::const_iterator q = snaps.lower_bound(p->second.first);
     if (q == snaps.end() || *q > p->first) {
       dout(10) << " purging old_inode [" << p->second.first << "," << p->first << "]" << dendl;
@@ -2465,8 +2479,8 @@ void CInode::purge_stale_snap_data(const set<snapid_t>& snaps)
  */
 old_inode_t * CInode::pick_old_inode(snapid_t snap)
 {
-  map<snapid_t, old_inode_t>::iterator p = old_inodes.lower_bound(snap);  // p is first key >= to snap
-  if (p != old_inodes.end() && p->second.first <= snap) {
+  compact_map<snapid_t, old_inode_t>::iterator p = old_inodes.lower_bound(snap);  // p is first key >= to snap
+  if (!p.end() && p->second.first <= snap) {
     dout(10) << "pick_old_inode snap " << snap << " -> [" << p->second.first << "," << p->first << "]" << dendl;
     return &p->second;
   }
@@ -2979,8 +2993,8 @@ int CInode::encode_inodestat(bufferlist& bl, Session *session,
     if (!is_auth())
       valid = false;
 
-    map<snapid_t,old_inode_t>::iterator p = old_inodes.lower_bound(snapid);
-    if (p != old_inodes.end()) {
+    compact_map<snapid_t,old_inode_t>::iterator p = old_inodes.lower_bound(snapid);
+    if (!p.end()) {
       if (p->second.first > snapid) {
         if  (p != old_inodes.begin())
           --p;
@@ -3538,7 +3552,7 @@ void InodeStore::dump(Formatter *f) const
     // FIXME: dirfragtree: dump methods for fragtree_t
     // FIXME: xattrs: JSON-safe versions of binary xattrs
     f->open_array_section("old_inodes");
-    for (std::map<snapid_t, old_inode_t>::const_iterator i = old_inodes.begin(); i != old_inodes.end(); ++i) {
+    for (compact_map<snapid_t, old_inode_t>::const_iterator i = old_inodes.begin(); !i.end(); ++i) {
       f->open_object_section("old_inode");
       {
         // The key is the last snapid, the first is in the old_inode_t
