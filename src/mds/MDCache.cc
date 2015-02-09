@@ -5866,8 +5866,8 @@ void MDCache::identify_files_to_recover(vector<CInode*>& recover_q, vector<CInod
       continue;
     
     bool recover = false;
-    for (map<client_t,client_writeable_range_t>::iterator p = in->inode.client_ranges.begin();
-	 p != in->inode.client_ranges.end();
+    for (compact_map<client_t,client_writeable_range_t>::iterator p = in->inode.client_ranges.begin();
+	 !p.end();
 	 ++p) {
       Capability *cap = in->get_client_cap(p->first);
       if (!cap) {
@@ -9221,9 +9221,7 @@ void MDCache::purge_stray(CDentry *dn)
 			  NULL, gather.new_sub());
   }
   // remove old backtrace objects
-  for (vector<int64_t>::iterator p = pi->old_pools.begin();
-       p != pi->old_pools.end();
-       ++p) {
+  for (compact_set<int64_t>::iterator p = pi->old_pools.begin(); !p.end(); ++p) {
     object_locator_t oloc(*p);
     dout(10) << "purge_stray remove backtrace object " << oid
 	     << " old pool " << *p << " snapc " << snapc << dendl;

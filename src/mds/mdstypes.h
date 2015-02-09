@@ -19,6 +19,7 @@
 #include "include/xlist.h"
 #include "include/interval_set.h"
 #include "include/compact_map.h"
+#include "include/compact_set.h"
 
 #include "inode_backtrace.h"
 
@@ -385,7 +386,7 @@ struct inode_t {
   // file (data access)
   ceph_dir_layout  dir_layout;    // [dir only]
   ceph_file_layout layout;
-  vector <int64_t> old_pools;
+  compact_set <int64_t> old_pools;
   uint64_t   size;        // on directory, # dentries
   uint64_t   max_size_ever; // max size the file has ever been
   uint32_t   truncate_seq;
@@ -394,10 +395,10 @@ struct inode_t {
   utime_t    mtime;   // file data modify time.
   utime_t    atime;   // file data access time.
   uint32_t   time_warp_seq;  // count of (potential) mtime/atime timewarps (i.e., utimes())
-  bufferlist inline_data;
+  bufferlist *inline_data;
   version_t  inline_version;
 
-  std::map<client_t,client_writeable_range_t> client_ranges;  // client(s) can write to these ranges
+  compact_map<client_t,client_writeable_range_t> client_ranges;  // client(s) can write to these ranges
 
   // dirfrag, recursive accountin
   frag_info_t dirstat;         // protected by my filelock
@@ -421,17 +422,31 @@ struct inode_t {
 	      truncate_seq(0), truncate_size(0), truncate_from(0),
 	      truncate_pending(0),
 	      time_warp_seq(0),
-	      inline_version(1),
+	      inline_data(0), inline_version(1),
 	      version(0), file_data_version(0), xattr_version(0), backtrace_version(0) {
     clear_layout();
     memset(&dir_layout, 0, sizeof(dir_layout));
     memset(&quota, 0, sizeof(quota));
+  }
+  ~inode_t() {
+    free_inline_data();
   }
 
   // file type
   bool is_symlink() const { return (mode & S_IFMT) == S_IFLNK; }
   bool is_dir()     const { return (mode & S_IFMT) == S_IFDIR; }
   bool is_file()    const { return (mode & S_IFMT) == S_IFREG; }
+
+  size_t inline_data_empty() const { return !inline_data || inline_data->length() == 0; }
+  void free_inline_data() {
+    delete inline_data;
+    inline_data = NULL;
+  }
+  bufferlist& get_inline_data() {
+    if (!inline_data)
+      inline_data = new bufferlist;
+    return *inline_data;
+  }
 
   bool is_truncating() const { return (truncate_pending > 0); }
   void truncate(uint64_t old_size, uint64_t new_size) {
@@ -467,8 +482,8 @@ struct inode_t {
 
   uint64_t get_max_size() const {
     uint64_t max = 0;
-      for (std::map<client_t,client_writeable_range_t>::const_iterator p = client_ranges.begin();
-	   p != client_ranges.end();
+      for (compact_map<client_t,client_writeable_range_t>::const_iterator p = client_ranges.begin();
+	   !p.end();
 	   ++p)
 	if (p->second.range.last > max)
 	  max = p->second.range.last;
@@ -478,16 +493,16 @@ struct inode_t {
     if (new_max == 0) {
       client_ranges.clear();
     } else {
-      for (std::map<client_t,client_writeable_range_t>::iterator p = client_ranges.begin();
-	   p != client_ranges.end();
+      for (compact_map<client_t,client_writeable_range_t>::iterator p = client_ranges.begin();
+	   !p.end();
 	   ++p)
 	p->second.range.last = new_max;
     }
   }
 
   void trim_client_ranges(snapid_t last) {
-    std::map<client_t, client_writeable_range_t>::iterator p = client_ranges.begin();
-    while (p != client_ranges.end()) {
+    compact_map<client_t, client_writeable_range_t>::iterator p = client_ranges.begin();
+    while (!p.end()) {
       if (p->second.follows >= last)
 	client_ranges.erase(p++);
       else
@@ -504,7 +519,7 @@ struct inode_t {
 
   void add_old_pool(int64_t l) {
     backtrace_version = version;
-    old_pools.push_back(l);
+    old_pools.insert(l);
   }
 
   void encode(bufferlist &bl) const;

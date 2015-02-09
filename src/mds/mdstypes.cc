@@ -275,7 +275,10 @@ void inode_t::encode(bufferlist &bl) const
   ::encode(old_pools, bl);
   ::encode(max_size_ever, bl);
   ::encode(inline_version, bl);
-  ::encode(inline_data, bl);
+  if (inline_data)
+    ::encode(*inline_data, bl);
+  else
+    ::encode((uint32_t)0, bl);
 
   ::encode(quota, bl);
 
@@ -341,7 +344,12 @@ void inode_t::decode(bufferlist::iterator &p)
     ::decode(max_size_ever, p);
   if (struct_v >= 9) {
     ::decode(inline_version, p);
-    ::decode(inline_data, p);
+    uint32_t inline_len;
+    ::decode(inline_len, p);
+    if (inline_len > 0)
+      ::decode_nohead(inline_len, get_inline_data(), p);
+    else
+      free_inline_data();
   } else {
     inline_version = CEPH_INLINE_NONE;
   }
@@ -372,10 +380,8 @@ void inode_t::dump(Formatter *f) const
   f->close_section();
 
   f->open_array_section("old_pools");
-  vector<int64_t>::const_iterator i = old_pools.begin();
-  while(i != old_pools.end()) {
+  for (compact_set<int64_t>::const_iterator i = old_pools.begin(); !i.end(); ++i)
     f->dump_int("pool", *i);
-  }
   f->close_section();
 
   f->dump_unsigned("size", size);
@@ -388,7 +394,7 @@ void inode_t::dump(Formatter *f) const
   f->dump_unsigned("time_warp_seq", time_warp_seq);
 
   f->open_array_section("client_ranges");
-  for (map<client_t,client_writeable_range_t>::const_iterator p = client_ranges.begin(); p != client_ranges.end(); ++p) {
+  for (compact_map<client_t,client_writeable_range_t>::const_iterator p = client_ranges.begin(); !p.end(); ++p) {
     f->open_object_section("client");
     f->dump_unsigned("client", p->first.v);
     p->second.dump(f);
@@ -444,8 +450,10 @@ int inode_t::compare(const inode_t &other, bool *divergent) const
         mtime != other.mtime ||
         atime != other.atime ||
         time_warp_seq != other.time_warp_seq ||
-        !(*const_cast<bufferlist*>(&inline_data) ==
-            *const_cast<bufferlist*>(&other.inline_data)) ||
+	(inline_data_empty() != other.inline_data_empty() ||
+	 (!inline_data_empty() &&
+	  !(*const_cast<bufferlist*>(inline_data) ==
+	    *const_cast<bufferlist*>(other.inline_data)))) ||
         inline_version != other.inline_version ||
         client_ranges != other.client_ranges ||
         !(dirstat == other.dirstat) ||

@@ -1070,15 +1070,10 @@ void CInode::build_backtrace(int64_t pool, inode_backtrace_t& bt)
     in = diri;
     pdn = in->get_parent_dn();
   }
-  vector<int64_t>::iterator i = inode.old_pools.begin();
-  while(i != inode.old_pools.end()) {
+  for (compact_set<int64_t>::iterator i = inode.old_pools.begin(); !i.end(); ++i) {
     // don't add our own pool id to old_pools to avoid looping (e.g. setlayout 0, 1, 0)
-    if (*i == pool) {
-      ++i;
-      continue;
-    }
-    bt.old_pools.insert(*i);
-    ++i;
+    if (*i != pool)
+      bt.old_pools.insert(*i);
   }
 }
 
@@ -1135,9 +1130,7 @@ void CInode::store_backtrace(MDSInternalContextBase *fin, int op_prio)
 				 0, NULL, gather.new_sub());
 
   set<int64_t> old_pools;
-  for (vector<int64_t>::iterator p = inode.old_pools.begin();
-      p != inode.old_pools.end();
-      ++p) {
+  for (compact_set<int64_t>::iterator p = inode.old_pools.begin(); !p.end(); ++p) {
     if (*p == pool || old_pools.count(*p))
       continue;
 
@@ -1381,7 +1374,10 @@ void CInode::encode_lock_state(int type, bufferlist& bl)
 	::encode(inode.truncate_seq, bl);
 	::encode(inode.truncate_size, bl);
 	::encode(inode.client_ranges, bl);
-	::encode(inode.inline_data, bl);
+	if (inode.inline_data)
+	  ::encode(inode.inline_data, bl);
+	else
+	  ::encode((uint32_t)0, bl);
 	::encode(inode.inline_version, bl);
       }
     } else {
@@ -1579,7 +1575,12 @@ void CInode::decode_lock_state(int type, bufferlist& bl)
 	::decode(inode.truncate_seq, p);
 	::decode(inode.truncate_size, p);
 	::decode(inode.client_ranges, p);
-	::decode(inode.inline_data, p);
+	uint32_t inline_len;
+	::decode(inline_len, p);
+	if (inline_len > 0)
+	  ::decode_nohead(inline_len, inode.get_inline_data(), p);
+	else
+	  inode.free_inline_data();
 	::decode(inode.inline_version, p);
       }
     } else {
@@ -3071,7 +3072,8 @@ int CInode::encode_inodestat(bufferlist& bl, Session *session,
 	     (cap && cap->client_inline_version < i->inline_version) ||
 	     (getattr_caps & CEPH_CAP_FILE_RD)) { // client requests inline data
     inline_version = i->inline_version;
-    inline_data = i->inline_data;
+    if (!i->inline_data_empty())
+      inline_data = i->get_inline_data();
   }
 
   // nest (do same as file... :/)
@@ -3268,7 +3270,8 @@ void CInode::encode_cap_message(MClientCaps *m, Capability *cap)
 
   if (cap->client_inline_version < i->inline_version) {
     m->inline_version = cap->client_inline_version = i->inline_version;
-    m->inline_data = i->inline_data;
+    if (!i->inline_data_empty())
+      m->inline_data = i->get_inline_data();
   } else {
     m->inline_version = 0;
   }

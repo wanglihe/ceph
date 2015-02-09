@@ -3492,7 +3492,7 @@ void Server::handle_client_setattr(MDRequestRef& mdr)
     pi->mtime = mdr->get_op_stamp();
 
     // adjust client's max_size?
-    map<client_t,client_writeable_range_t> new_ranges;
+    compact_map<client_t,client_writeable_range_t> new_ranges;
     mds->locker->calc_new_client_ranges(cur, pi->size, new_ranges);
     if (pi->client_ranges != new_ranges) {
       dout(10) << " client_ranges " << pi->client_ranges << " -> " << new_ranges << dendl;

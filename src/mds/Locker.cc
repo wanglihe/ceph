@@ -2147,7 +2147,7 @@ public:
 };
 
 
-void Locker::calc_new_client_ranges(CInode *in, uint64_t size, map<client_t,client_writeable_range_t>& new_ranges)
+void Locker::calc_new_client_ranges(CInode *in, uint64_t size, compact_map<client_t,client_writeable_range_t>& new_ranges)
 {
   inode_t *latest = in->get_projected_inode();
   uint64_t ms;
@@ -2186,7 +2186,7 @@ bool Locker::check_inode_max_size(CInode *in, bool force_wrlock,
   assert(in->is_auth());
 
   inode_t *latest = in->get_projected_inode();
-  map<client_t, client_writeable_range_t> new_ranges;
+  compact_map<client_t, client_writeable_range_t> new_ranges;
   uint64_t size = latest->size;
   bool new_max = update_max;
 
@@ -2916,7 +2916,10 @@ void Locker::_update_cap_fields(CInode *in, int dirty, MClientCaps *m, inode_t *
         (dirty & CEPH_CAP_FILE_WR) &&
         inline_version > pi->inline_version) {
       pi->inline_version = inline_version;
-      pi->inline_data = m->inline_data;
+      if (inline_version != CEPH_INLINE_NONE)
+	pi->get_inline_data() = m->inline_data;
+      else
+	pi->free_inline_data();
     }
     if ((dirty & CEPH_CAP_FILE_EXCL) && atime != pi->atime) {
       dout(7) << "  atime " << pi->atime << " -> " << atime
