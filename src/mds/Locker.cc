@@ -1732,8 +1732,8 @@ void Locker::file_update_finish(CInode *in, MutationRef& mut, bool share, client
     dout(10) << " client_snap_caps " << in->client_snap_caps << dendl;
     // check for snap writeback completion
     bool gather = false;
-    map<int,set<client_t> >::iterator p = in->client_snap_caps.begin();
-    while (p != in->client_snap_caps.end()) {
+    compact_map<int,set<client_t> >::iterator p = in->client_snap_caps.begin();
+    while (!p.end()) {
       SimpleLock *lock = in->get_lock(p->first);
       assert(lock);
       dout(10) << " completing client_snap_caps for " << ccap_string(p->first)
@@ -2393,8 +2393,8 @@ void Locker::adjust_cap_wanted(Capability *cap, int wanted, int issue_seq)
 void Locker::_do_null_snapflush(CInode *head_in, client_t client, snapid_t follows)
 {
   dout(10) << "_do_null_snapflish client." << client << " follows " << follows << " on " << *head_in << dendl;
-  map<snapid_t, set<client_t> >::iterator p = head_in->client_need_snapflush.begin();
-  while (p != head_in->client_need_snapflush.end()) {
+  compact_map<snapid_t, set<client_t> >::iterator p = head_in->client_need_snapflush.begin();
+  while (!p.end()) {
     snapid_t snapid = p->first;
     set<client_t>& clients = p->second;
     ++p;  // be careful, q loop below depends on this
@@ -2409,8 +2409,8 @@ void Locker::_do_null_snapflush(CInode *head_in, client_t client, snapid_t follo
 	// hrm, look forward until we find the inode. 
 	//  (we can only look it up by the last snapid it is valid for)
 	dout(10) << " didn't have " << head_in->ino() << " snapid " << snapid << dendl;
-	for (map<snapid_t, set<client_t> >::iterator q = p;  // p is already at next entry
-	     q != head_in->client_need_snapflush.end();
+	for (compact_map<snapid_t, set<client_t> >::iterator q = p;  // p is already at next entry
+	     !q.end();
 	     ++q) {
 	  dout(10) << " trying snapid " << q->first << dendl;
 	  sin = mdcache->get_inode(head_in->ino(), q->first);
