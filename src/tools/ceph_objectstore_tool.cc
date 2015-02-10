@@ -2507,7 +2507,10 @@ int main(int argc, char **argv)
 
   ObjectStore *fs = ObjectStore::create(g_ceph_context, type, dpath, jpath, flags);
   if (fs == NULL) {
-    cerr << "Must provide --type (filestore, memstore, keyvaluestore)" << std::endl;
+    string kvs;
+    if (g_ceph_context->check_experimental_feature_enabled("keyvaluestore"))
+      kvs = ", keyvaluestore";
+    cerr << "Must provide --type (filestore, memstore" << kvs << ")" << std::endl;
     myexit(1);
   }
 
